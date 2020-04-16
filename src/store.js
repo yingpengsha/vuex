@@ -3,6 +3,9 @@ import devtoolPlugin from './plugins/devtool'
 import ModuleCollection from './module/module-collection'
 import { forEachValue, isObject, isPromise, assert, partial } from './util'
 
+// 在 new Store 之前，vue 会先 initUse Ref: https://github.com/vuejs/vue/blob/dev/src/core/global-api/use.js
+// initUse 的主要作用其实就是初始化 Vue.use 这个函数，其中 use 的作用就是初始化对应的库的 install 函数，或者实例本身
+// 也就是说，Vuex 的初始流程是先运行 install 再 new Store。
 let Vue // bind on install
 
 export class Store {
@@ -10,34 +13,43 @@ export class Store {
     // Auto install if it is not done yet and `window` has `Vue`.
     // To allow users to avoid auto-installation in some cases,
     // this code should be placed here. See #731
+    // 检查 Vue 实例是否传入
     if (!Vue && typeof window !== 'undefined' && window.Vue) {
       install(window.Vue)
     }
 
+    // 兼容性等信息提示
     if (process.env.NODE_ENV !== 'production') {
       assert(Vue, `must call Vue.use(Vuex) before creating a store instance.`)
       assert(typeof Promise !== 'undefined', `vuex requires a Promise polyfill in this browser.`)
       assert(this instanceof Store, `store must be called with the new operator.`)
     }
 
+    // 严格模式和插件列表提取
     const {
       plugins = [],
       strict = false
     } = options
 
-    // store internal state
+    // 数据初始化
+    // 记录 commit 状态
     this._committing = false
+    // 以键值对的形式存储 action
     this._actions = Object.create(null)
+    // action 行为的订阅列表
     this._actionSubscribers = []
+    // 以键值对的形式存储 mutation
     this._mutations = Object.create(null)
+    // 以键值对的形式存储 getter
     this._wrappedGetters = Object.create(null)
+    // 初始化 modules
     this._modules = new ModuleCollection(options)
     this._modulesNamespaceMap = Object.create(null)
     this._subscribers = []
     this._watcherVM = new Vue()
     this._makeLocalGettersCache = Object.create(null)
 
-    // bind commit and dispatch to self
+    // 绑定 dispatch 和 commit 函数
     const store = this
     const { dispatch, commit } = this
     this.dispatch = function boundDispatch (type, payload) {
@@ -47,9 +59,10 @@ export class Store {
       return commit.call(store, type, payload, options)
     }
 
-    // strict mode
+    // 严格模式值初始化
     this.strict = strict
 
+    // 取出之前 new ModuleConllection 时 register 的 modules
     const state = this._modules.root.state
 
     // init root module.
@@ -57,8 +70,8 @@ export class Store {
     // and collects all module getters inside this._wrappedGetters
     installModule(this, state, [], this._modules.root)
 
-    // initialize the store vm, which is responsible for the reactivity
-    // (also registers _wrappedGetters as computed properties)
+    // new 一个 Vue 实例，将 state 放到 _vm.$$state 中
+    // 将 getters 放到 computed 上
     resetStoreVM(this, state)
 
     // apply plugins
@@ -275,7 +288,7 @@ function resetStoreVM (store, state, hot) {
     // use computed to leverage its lazy-caching mechanism
     // direct inline function use will lead to closure preserving oldVm.
     // using partial to return function with only arguments preserved in closure environment.
-    computed[key] = partial(fn, store)
+    computed[key] = partial(fn, store) // 为什么不用 fn.bind(store, store) ?
     Object.defineProperty(store.getters, key, {
       get: () => store._vm[key],
       enumerable: true // for local getters
@@ -312,11 +325,12 @@ function resetStoreVM (store, state, hot) {
   }
 }
 
+// 装配 module
 function installModule (store, rootState, path, module, hot) {
   const isRoot = !path.length
   const namespace = store._modules.getNamespace(path)
 
-  // register in namespace map
+  // 在 namespaceMap 中创建当前 module
   if (module.namespaced) {
     if (store._modulesNamespaceMap[namespace] && process.env.NODE_ENV !== 'production') {
       console.error(`[vuex] duplicate namespace ${namespace} for the namespaced module ${path.join('/')}`)
@@ -324,7 +338,7 @@ function installModule (store, rootState, path, module, hot) {
     store._modulesNamespaceMap[namespace] = module
   }
 
-  // set state
+  // 将 module 设置为响应式数据，并挂在在祖先 module 上
   if (!isRoot && !hot) {
     const parentState = getNestedState(rootState, path.slice(0, -1))
     const moduleName = path[path.length - 1]
@@ -340,6 +354,8 @@ function installModule (store, rootState, path, module, hot) {
     })
   }
 
+  // module.context 主要是创建用于 module 内部调用的 dispatch/commit
+  // context 内的 dispatch/commit 和全局的 dispatch/commit 方法的区别在于，全局需要加 path，而 context 里的可以自动帮你加上 path
   const local = module.context = makeLocalContext(store, namespace, path)
 
   module.forEachMutation((mutation, key) => {

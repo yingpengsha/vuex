@@ -32,6 +32,7 @@ export default class ModuleCollection {
 
     const newModule = new Module(rawModule, runtime)
     if (path.length === 0) {
+      // 根 module 的初始化
       this.root = newModule
     } else {
       const parent = this.get(path.slice(0, -1))
